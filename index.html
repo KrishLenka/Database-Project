@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Webpage</title>
+    <style>
+        *{
+            font-family: sans-serif;
+        }
+        table {
+            margin-left: auto;
+            margin-right: auto;
+            width: 80%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        .filter {
+            margin-bottom: 10px;
+        }
+        .dropdown {
+            border: 2px solid #ddd;
+            padding: 8px;
+            margin: 8px;
+            position: relative;
+            display: inline-block;
+        }
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: white;
+            min-width: 200px;
+            box-shadow: 0px 8px 16px rgba(0, 0, 0, 0.2);
+            z-index: 1;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+        }
+        .dropdown-content input/* [type="checkbox"] */ {
+            margin-right: 10px;
+        }
+        .dropdown-content label {
+            display: block;
+            padding: 5px;
+            cursor: pointer;
+        }
+        .dropdown-content label:hover {
+            background-color: #f1f1f1;
+        }
+        .dropdown-search{
+            width: auto; /* calc(100% - 16px); */
+            /* padding: 8px; */
+            /* margin: 8px; */
+            /* border: 1px solid; */
+            /* border-radius: 4px; */
+        }
+
+        .dropdown:hover .dropdown-content {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Database Webpage</h1>
+    <p>
+        Only accepts .csv files
+    </p>
+    <input type="file" id="csvFileInput" accept=".csv" />
+    <div id="filters" class="filter"></div>
+    <button id="applyFiltersBtn">Apply Filters</button>
+    <button id="clearFiltersBtn">Clear Filters</button>
+    <table id="csvTable"></table>
+    <div class="pagination" id="paginationControls">
+        <button id="prevPageBtn" disabled>◀ Previous</button>
+        <button id="nextPageBtn" disabled>Next ▶</button>
+    </div>
+    <button id="downloadBtn">Download Filtered Data</button>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script>
+        const csvFileInput = document.getElementById('csvFileInput');
+        const csvTable = document.getElementById('csvTable');
+        const filtersDiv = document.getElementById('filters');
+        const applyFiltersBtn = document.getElementById('applyFiltersBtn');
+        const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const prevPageBtn = document.getElementById('prevPageBtn');
+        const nextPageBtn = document.getElementById('nextPageBtn');
+        const rowsPerPage = 50;
+
+        let tableData = [];
+        let filteredData = [];
+        let currentPage = 1;
+        let selectedFilters = {};
+
+        csvFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        tableData = results.data;
+                        filteredData = [...tableData];
+                        currentPage = 1;
+                        renderTable(filteredData, currentPage);
+                        createFilters(Object.keys(tableData[0]));
+                        updatePaginationControls(filteredData);
+                    }
+                });
+            }
+        });
+
+        function renderTable(data, page) {
+            const start = (page - 1) * rowsPerPage;
+            const end = start + rowsPerPage;
+            const pageData = data.slice(start, end);
+
+            csvTable.innerHTML = `
+                <thead>
+                    <tr>${Object.keys(data[0] || {}).map(col => `<th>${col}</th>`).join('')}</tr>
+                </thead>
+                <tbody>
+                    ${pageData.map(row => `
+                        <tr>${Object.values(row).map(value => `<td>${value || ''}</td>`).join('')}</tr>
+                    `).join('')}
+                </tbody>
+            `;
+        }
+
+        function filterDropdownOptions(searchInput, labels){
+            const searchTerm = searchInput.value.toLowerCase();
+            labels.forEach(label =>{
+                const text = label.textContent.toLowerCase();
+                label.style.display = text.includes(searchTerm) ? 'block' : 'none';
+            });
+        }
+
+        function createFilters(columns) {
+    filtersDiv.innerHTML = '';
+    selectedFilters = {};
+
+    columns.forEach(column => {
+        const uniqueValues = [...new Set(tableData.map(row => row[column]).filter(Boolean))].sort();
+        const filter = document.createElement('div');
+        filter.classList.add('dropdown');
+        filter.innerHTML = `
+            <span>${column}</span>
+            <div class="dropdown-content">
+                <input class="dropdown-search" type="text" placeholder="Search ${column}" data-column="${column}" />
+                <div class="dropdown-options">
+                    ${uniqueValues.map(value => `
+                        <label>
+                            <input type="checkbox" value="${value}" /> ${value}
+                        </label>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        filtersDiv.appendChild(filter);
+        selectedFilters[column] = [];
+
+        const searchInput = filter.querySelector('.dropdown-search');
+        const optionsContainer = filter.querySelector('.dropdown-options');
+
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            updateDropdownOptions(column, uniqueValues, searchTerm, optionsContainer);
+        });
+
+        attachCheckboxListeners(column, optionsContainer);
+    });
+}
+
+// Helper function to update dropdown options dynamically
+function updateDropdownOptions(column, uniqueValues, searchTerm, container) {
+    container.innerHTML = uniqueValues
+        .filter(value => value.toLowerCase().includes(searchTerm))
+        .map(value => `
+            <label>
+                <input type="checkbox" value="${value}" ${selectedFilters[column].includes(value) ? 'checked' : ''} /> ${value}
+            </label>
+        `).join('');
+    attachCheckboxListeners(column, container);
+}
+
+// Helper function to attach checkbox listeners
+function attachCheckboxListeners(column, container) {
+    container.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        input.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                if (!selectedFilters[column].includes(e.target.value)) {
+                    selectedFilters[column].push(e.target.value);
+                }
+            } else {
+                selectedFilters[column] = selectedFilters[column].filter(val => val !== e.target.value);
+            }
+        });
+    });
+}
+
+
+
+        applyFiltersBtn.addEventListener('click', () => {
+            filteredData = tableData.filter(row => {
+                return Object.keys(selectedFilters).every(column => {
+                    return selectedFilters[column].length === 0 || selectedFilters[column].includes(row[column]);
+                });
+            });
+            currentPage = 1;
+            renderTable(filteredData, currentPage);
+            updatePaginationControls(filteredData);
+        });
+
+        clearFiltersBtn.addEventListener('click', () => {
+            filteredData = [...tableData];
+            currentPage = 1;
+            selectedFilters = {};
+            renderTable(filteredData, currentPage);
+            updatePaginationControls(filteredData);
+            createFilters(Object.keys(tableData[0]));
+        });
+
+        function updatePaginationControls(data) {
+            const totalPages = Math.ceil(data.length / rowsPerPage);
+            prevPageBtn.disabled = currentPage === 1;
+            nextPageBtn.disabled = currentPage === totalPages || totalPages === 0;
+
+            prevPageBtn.onclick = () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderTable(filteredData, currentPage);
+                    updatePaginationControls(filteredData);
+                }
+            };
+
+            nextPageBtn.onclick = () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderTable(filteredData, currentPage);
+                    updatePaginationControls(filteredData);
+                }
+            };
+        }
+
+        downloadBtn.addEventListener('click', () => {
+            const csv = Papa.unparse(filteredData);
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'filtered_data.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        });
+    </script>
+</body>
+</html>
